@@ -1,0 +1,19 @@
+services:
+  telegram-save-bot:
+    build: .
+    container_name: telegram-save-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # Persist the file_id cache between container restarts
+      - ./cache.json:/app/cache.json
+      # Temporary download storage (optional, for debugging)
+      - ./downloads:/tmp/tg_downloads
+    # Security: run as non-root
+    # user: "1000:1000"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
