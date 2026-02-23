@@ -35,6 +35,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Silence httpx to prevent bot token from leaking in request URLs
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 # ─── URL detection regex ──────────────────────────────────────────────────────
 URL_REGEX = re.compile(
     r"https?://(?:www\.)?"
