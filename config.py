@@ -18,7 +18,8 @@ if not BOT_TOKEN:
 
 # ─── Download Settings (constants) ────────────────────────────────────────────
 MAX_VIDEO_HEIGHT: int = 1080          # Max video resolution height in pixels
-MAX_FILE_SIZE_MB: int = 50            # Telegram upload limit (50 MB for bots)
+MAX_VIDEO_SIZE_MB: int = 2048         # Telegram video upload limit (2 GB)
+MAX_AUDIO_SIZE_MB: int = 50           # Telegram audio upload limit (50 MB)
 DOWNLOAD_DIR: str = "/tmp/tg_downloads"
 
 # Ensure download directory exists

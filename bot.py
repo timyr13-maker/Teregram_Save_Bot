@@ -26,7 +26,10 @@ from telegram.ext import (
     filters,
 )
 
-from config import BOT_TOKEN, MAX_VIDEO_HEIGHT, MAX_FILE_SIZE_MB, DOWNLOAD_DIR
+from config import BOT_TOKEN, MAX_VIDEO_HEIGHT, MAX_VIDEO_SIZE_MB, MAX_AUDIO_SIZE_MB, DOWNLOAD_DIR
+
+# Resolution fallback chain: try each height in order if the file is too large
+FALLBACK_HEIGHTS: list[int] = [1080, 720, 480, 360]
 
 # ─── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -185,13 +188,13 @@ class ProgressTracker:
 
 # ─── Helpers ───────────────────────────────────────────────────────────────────
 
-def _get_yt_dlp_video_opts(download_dir: str, progress_hook=None) -> dict:
-    """yt-dlp options for video download (max 1080p, with audio)."""
+def _get_yt_dlp_video_opts(download_dir: str, progress_hook=None, max_height: int = MAX_VIDEO_HEIGHT) -> dict:
+    """yt-dlp options for video download with configurable max height."""
     opts = {
         "format": (
-            f"bestvideo[height<={MAX_VIDEO_HEIGHT}][ext=mp4]+bestaudio[ext=m4a]"
-            f"/bestvideo[height<={MAX_VIDEO_HEIGHT}]+bestaudio"
-            f"/best[height<={MAX_VIDEO_HEIGHT}]"
+            f"bestvideo[height<={max_height}][ext=mp4]+bestaudio[ext=m4a]"
+            f"/bestvideo[height<={max_height}]+bestaudio"
+            f"/best[height<={max_height}]"
             f"/best"
         ),
         "merge_output_format": "mp4",
@@ -401,7 +404,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def _process_video_download(
     update: Update, context: ContextTypes.DEFAULT_TYPE, url: str
 ) -> None:
-    """Download and send video, with caching and progress bar."""
+    """Download and send video, with caching, progress bar, and resolution fallback."""
 
     # ── Check cache first ──
     cached = _cache_get(url, "video")
@@ -416,31 +419,58 @@ async def _process_video_download(
         except Exception as e:
             logger.warning(f"Cache hit failed, re-downloading: {e}")
 
-    # ── Download with progress ──
-    tracker = ProgressTracker()
+    # ── Download with resolution fallback ──
     status_msg = await update.message.reply_text("⏳ Скачиваю...")
+    filepath = None
+    info = None
+    used_height = MAX_VIDEO_HEIGHT
 
-    opts = _get_yt_dlp_video_opts(DOWNLOAD_DIR, progress_hook=tracker.hook)
-    filepath, info = await _download_with_progress(url, opts, status_msg, "видео", tracker)
+    for height in FALLBACK_HEIGHTS:
+        tracker = ProgressTracker()
+        opts = _get_yt_dlp_video_opts(DOWNLOAD_DIR, progress_hook=tracker.hook, max_height=height)
+        filepath, info = await _download_with_progress(url, opts, status_msg, "видео", tracker)
+
+        if not filepath or not os.path.exists(filepath):
+            await status_msg.edit_text("❌ Не удалось скачать. Проверь ссылку.")
+            return
+
+        file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
+
+        if file_size_mb <= MAX_VIDEO_SIZE_MB:
+            used_height = height
+            break  # File fits — proceed to send
+
+        # File too large — try a lower resolution
+        logger.info(f"File too large at {height}p ({file_size_mb:.0f} MB), trying lower resolution")
+        _cleanup_file(filepath)
+        filepath = None
+
+        # Pick the next resolution to show in status
+        current_idx = FALLBACK_HEIGHTS.index(height)
+        if current_idx + 1 < len(FALLBACK_HEIGHTS):
+            next_height = FALLBACK_HEIGHTS[current_idx + 1]
+            await status_msg.edit_text(
+                f"📐 В {height}p файл слишком большой.\n"
+                f"⏳ Пробую {next_height}p..."
+            )
+        else:
+            # Exhausted all resolutions
+            await status_msg.edit_text("❌ Файл слишком большой даже в 360p. Попробуй что-то покороче.")
+            return
 
     if not filepath or not os.path.exists(filepath):
         await status_msg.edit_text("❌ Не удалось скачать. Проверь ссылку.")
         return
 
-    file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
     title = _format_title(info)
-
-    if file_size_mb > MAX_FILE_SIZE_MB:
-        _cleanup_file(filepath)
-        await status_msg.edit_text("❌ Файл слишком большой. Попробуй что-то покороче.")
-        return
+    quality_note = f" ({used_height}p)" if used_height < MAX_VIDEO_HEIGHT else ""
 
     try:
         await status_msg.edit_text("📤 Отправляю...")
         with open(filepath, "rb") as video_file:
             sent_message = await update.message.reply_video(
                 video=video_file,
-                caption=f"🎬 {title}",
+                caption=f"🎬 {title}{quality_note}",
                 supports_streaming=True,
                 read_timeout=120,
                 write_timeout=120,
@@ -450,7 +480,7 @@ async def _process_video_download(
         # ── Save to cache ──
         if sent_message.video:
             _cache_set(url, "video", sent_message.video.file_id, title, "video")
-            logger.info(f"Cached video: {title}")
+            logger.info(f"Cached video: {title} at {used_height}p")
 
     except Exception as e:
         logger.error(f"Error sending video: {e}")
@@ -490,7 +520,7 @@ async def _process_audio_download(
     file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
     title = _format_title(info)
 
-    if file_size_mb > MAX_FILE_SIZE_MB:
+    if file_size_mb > MAX_AUDIO_SIZE_MB:
         _cleanup_file(filepath)
         await status_msg.edit_text("❌ Файл слишком большой. Попробуй что-то покороче.")
         return
