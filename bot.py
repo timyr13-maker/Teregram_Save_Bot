@@ -570,9 +570,8 @@ def main() -> None:
     # Load cache on startup
     cache = _load_cache()
     logger.info(f"📦 Cache loaded: {len(cache)} entries")
-
-    app = Application.builder().token(BOT_TOKEN).build()
-
+    
+    app = Application.builder().token(BOT_TOKEN).base_url('http://127.0.0.1:8081/bot').build()
     # Register handlers
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
