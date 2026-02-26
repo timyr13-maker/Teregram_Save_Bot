@@ -208,7 +208,7 @@ def _get_yt_dlp_video_opts(download_dir: str, progress_hook=None, max_height: in
         "postprocessors": [
             {
                 "key": "FFmpegVideoConvertor",
-                "preferedformat": "mp4",
+                "preferredformat": "mp4",
             }
         ],
     }
@@ -472,8 +472,6 @@ async def _process_video_download(
                 video=video_file,
                 caption=f"🎬 {title}{quality_note}",
                 supports_streaming=True,
-                read_timeout=120,
-                write_timeout=120,
             )
         await status_msg.delete()
 
@@ -537,8 +535,6 @@ async def _process_audio_download(
                 caption=f"🎵 {title}",
                 performer=performer,
                 title=track_title,
-                read_timeout=120,
-                write_timeout=120,
             )
         await status_msg.delete()
 
@@ -571,7 +567,7 @@ def main() -> None:
     cache = _load_cache()
     logger.info(f"📦 Cache loaded: {len(cache)} entries")
     
-    app = Application.builder().token(BOT_TOKEN).base_url()
+    app = Application.builder().token(BOT_TOKEN).build()
     
     # Register handlers
     app.add_handler(CommandHandler("start", cmd_start))
